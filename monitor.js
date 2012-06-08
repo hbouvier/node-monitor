@@ -120,8 +120,8 @@ var util  = require('util'),
                     if (debug) util.log('monitor|ifconfig|stout=' + lines[i] + '|capture=' + util.inspect(capture));
                     if (capture !== null && capture[0] !== undefined && capture.length === ifconfigRegexLen) { 
                         if (bytesSent !== -1 && bytesReceived !== -1) {
-                            send(hostname + '.network.' + interfaceName + '.sent:' + (bytesSent - capture[sent]) + '|c');
-                            send(hostname + '.network.' + interfaceName + '.received:' + (bytesReceived - capture[received]) + '|c');
+                            send(hostname + '.network.' + interfaceName + '.sent:' + (capture[sent] - bytesSent) + '|c');
+                            send(hostname + '.network.' + interfaceName + '.received:' + (capture[received] - bytesReceived) + '|c');
                         }
                         bytesSent     = capture[sent];
                         bytesReceived = capture[received];
