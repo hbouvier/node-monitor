@@ -97,8 +97,8 @@ var util  = require('util'),
     }
     
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    var bytesSent     = -1,
-        bytesReceived = -1;
+    var bytesSent     = [],
+        bytesReceived = [];
     function checkNetwork() {
         var interfaceName = 'unknown';
         var ifconfig = execute('/sbin/ifconfig', null, null, null, function (err, userValue) {
@@ -119,12 +119,12 @@ var util  = require('util'),
                     capture = lines[i].match(ifconfigRegex);
                     if (debug) util.log('monitor|ifconfig|stout=' + lines[i] + '|capture=' + util.inspect(capture));
                     if (capture !== null && capture[0] !== undefined && capture.length === ifconfigRegexLen) { 
-                        if (bytesSent !== -1 && bytesReceived !== -1) {
-                            send(hostname + '.network.' + interfaceName + '.sent:' + (capture[sent] - bytesSent) + '|g');
-                            send(hostname + '.network.' + interfaceName + '.received:' + (capture[received] - bytesReceived) + '|g');
+                        if (bytesSent[interfaceName] !== undefined && bytesReceived[interfaceName] !== undefined) {
+                            send(hostname + '.network.' + interfaceName + '.sent:' + (capture[sent] - bytesSent[interfaceName]) + '|g');
+                            send(hostname + '.network.' + interfaceName + '.received:' + (capture[received] - bytesReceived[interfaceName]) + '|g');
                         }
-                        bytesSent     = capture[sent];
-                        bytesReceived = capture[received];
+                        bytesSent[interfaceName]     = capture[sent];
+                        bytesReceived[interfaceName] = capture[received];
                     }
                 }
             }
