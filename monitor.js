@@ -4,12 +4,19 @@ var util  = require('util'),
     os    = require("os");
 
 /**
+ * Linux
  * vmstat -n 10
  * procs -----------memory---------- ---swap-- -----io---- --system-- -----cpu------
  *  r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st
  *  0  0  45080 10970204 120756 437012    0    0     0     2   11    4  0  0 100  0  0
  *  0  0  45080 10970204 120756 437012    0    0     0     0 1012   70  0  0 100  0  0
  *  0  0  45080 10970204 120756 437012    0    0     0     0 1010   78  0  0 100  0  0
+ * 
+ * Cygwin
+ * procs -----------memory---------- ---swap-- -----io---- -system-- ----cpu----
+ *  r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa
+ *  0  0  10020 1977732      0      0    0    0     0     0    0    0  0  1 99  0
+ *
  */
 
 /**
@@ -40,6 +47,20 @@ var util  = require('util'),
  *           collisions:0 txqueuelen:0 
  *           RX bytes:270297634 (257.7 MiB)  TX bytes:270297634 (257.7 MiB)
  */
+ 
+ /**
+  * $ netstat -e
+  * Interface Statistics
+  * 
+  *                            Received            Sent
+  * 
+  * Bytes                    2190616468      2731744448
+  * Unicast packets            24326331        17355436
+  * Non-unicast packets         2506457           24290
+  * Discards                          0               0
+  * Errors                            0               0
+  * Unknown protocols              5528
+  */
 
 (function () {
     var debug    = false,
@@ -49,13 +70,15 @@ var util  = require('util'),
         samplingRate = process.env.SAMPLING_RATE || 10,
         disksamplingRate = process.env.DISK_SAMPLING_RATE || 60000,
         hostname = os.hostname(),
-        vmstatRegex = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/,
-        waitForRuntime=1,nbUninterruptibleSleep=2,swpd=3,free=4,buffers=5,cache=6,swappedIn=7,swappedOut=8,read=9,write=10,interrupt=11,contextSwitch=12,user=13,system=14,idle=15,waitIO=16,stolenVM=17,vmstatRegexLen=18,
+        vmstatRegex = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(\d+))?\s*$/,
+        waitForRuntime=1,nbUninterruptibleSleep=2,swpd=3,free=4,buffers=5,cache=6,swappedIn=7,swappedOut=8,read=9,write=10,interrupt=11,contextSwitch=12,user=13,system=14,idle=15,waitIO=16,stolenVM=17,vmstatRegexLen=18 -1,
         dfRegex =  /^\s*([^\s]+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)%\s+([^\s]+)\s*$/,
         fileSystem=1,blocks=2,used=3,available=4,capacity=5,mount=6,dfRegexLen=7,
         ifconfigInterfaceNameRegex = /^([a-zA-Z0-9]+)\s+/,
         ifconfigRegex = /^\s+RX\s+bytes:\s*(\d+)\s+\([^)]+\)\s+TX\s+bytes:\s*(\d+)\s+\([^)]*\)\s*$/,
-        received=1,sent=2,ifconfigRegexLen=3;
+        received=1,sent=2,ifconfigRegexLen=3,
+        netstatRegex = /^[^0-9]+(\d+)\s+(\d+)\s*$/,
+        nsReceived=1,nsSent=2,nsRegexLen=3;
         
 
     function send(message) {
@@ -99,7 +122,7 @@ var util  = require('util'),
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     var bytesSent     = [],
         bytesReceived = [];
-    function checkNetwork() {
+    function checkNetworkLinux() {
         var interfaceName = 'unknown';
         var ifconfig = execute('/sbin/ifconfig', null, null, null, function (err, userValue) {
             if (err) {
@@ -107,6 +130,7 @@ var util  = require('util'),
                 throw err;
             }
             userValue = userValue;
+            setTimeout(checkNetworkLinux, disksamplingRate);
         });
         ifconfig.stdout.on('data', function (data) {
             var lines = ('' + data).split(/\r?\n/);
@@ -123,8 +147,8 @@ var util  = require('util'),
                             send(hostname + '.network.' + interfaceName + '.sent:' + (capture[sent] - bytesSent[interfaceName]) + '|g');
                             send(hostname + '.network.' + interfaceName + '.received:' + (capture[received] - bytesReceived[interfaceName]) + '|g');
                         }
-                        bytesSent[interfaceName]     = capture[sent];
-                        bytesReceived[interfaceName] = capture[received];
+                        bytesSent[interfaceName]     = parseInt(capture[sent]);
+                        bytesReceived[interfaceName] = parseInt(capture[received]);
                     }
                 }
             }
@@ -132,14 +156,61 @@ var util  = require('util'),
         ifconfig.stderr.on('data', function (data) {
             if (debug) util.log('monitor|ifconfig|stderr=' + data + '\n');
         });
-        setTimeout(checkNetwork, disksamplingRate);
+    }
+    function checkNetworkWindows() {
+        var interfaceName = 'all',
+            totalSent = 0,
+            totalReceived = 0;
+
+        var ifconfig = execute('netstat', ['-e'], null, null, function (err, userValue) {
+            if (err) {
+                if (debug) util.log('monitor|netstat|host='+server+':'+port+'|err=' + util.inspect(err));
+                throw err;
+            }
+            userValue = userValue;
+            if (bytesSent[interfaceName] !== undefined && bytesReceived[interfaceName] !== undefined) {
+                send(hostname + '.network.' + interfaceName + '.sent:' + (totalSent - bytesSent[interfaceName]) + '|g');
+                send(hostname + '.network.' + interfaceName + '.received:' + (totalReceived - bytesReceived[interfaceName]) + '|g');
+            }
+            bytesSent[interfaceName]     = totalSent;
+            bytesReceived[interfaceName] = totalReceived;
+            setTimeout(checkNetworkWindows, disksamplingRate);
+        });
+        ifconfig.stdout.on('data', function (data) {
+            var lines = ('' + data).split(/\r?\n/);
+            for (var i = 0 ; i < lines.length ; ++i) {
+                var capture = lines[i].match(netstatRegex);
+                if (debug) util.log('monitor|netstat|stout=' + lines[i] + '|capture=' + util.inspect(capture));
+                if (capture !== null && capture[0] !== undefined && capture.length === nsRegexLen) { 
+                    totalSent     += parseInt(capture[nsSent]);
+                    totalReceived += parseInt(capture[nsReceived]);
+                }
+            }
+        });
+        ifconfig.stderr.on('data', function (data) {
+            if (debug) util.log('monitor|ifconfig|stderr=' + data + '\n');
+        });
+    }
+    
+    function isWindows() {
+        var win = 'Windows';
+        return (os.type().substring(0, win.length) == win);
+    }
+    
+    function checkNetwork() {
+        if (isWindows()) {
+            checkNetworkWindows();
+        } else {
+            checkNetworkLinux();
+        }
+
     }
     
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     
 
     function checkDisk() {
-        var df = execute('df', ['-P'], null, null, function (err, userValue) {
+        var df = execute((isWindows() ? '\\cygwin\\bin\\df.exe' : 'df'), (isWindows() ? null : ['-P']), null, null, function (err, userValue) {
             if (err) {
                 if (debug) util.log('monitor|df|host='+server+':'+port+'|err=' + util.inspect(err));
                 throw err;
@@ -162,23 +233,51 @@ var util  = require('util'),
         setTimeout(checkDisk, disksamplingRate);
     }
     
+    /////////////////////////////////////////// MAIN ///////////////////////////////////////////////////////////////////////////
     
-    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    util.log('Starting monitor on ' + hostname + ' to ' + server + ':' + port);
+    function vmstatWindows() {
+        var vmstatBuffer = '';
+        var vmstat = execute('\\cygwin\\bin\\vmstat.exe', ['-n', 1, 2], null, null, function (err, userValue) {
+            if (err) {
+                if (debug) util.log('monitor|vmstat|host='+server+':'+port+'|err=' + util.inspect(err));
+                throw err;
+            }
+            userValue = userValue;
+            processVmStatData(vmstatBuffer.split(/\n/)[3]);
+            setTimeout(vmstatWindows, samplingRate*1000);
+        });
+        vmstat.stdout.on('data', function (data) {
+            vmstatBuffer += data;
+        });
+        vmstat.stderr.on('data', function (data) {
+            if (debug) util.log('monitor|vmstat|stderr=' + data + '\n');
+        });
+    }
+
+    if (isWindows()) {
+        vmstatWindows();
+    } else {
+        var vmstat = execute((isWindows() ? '\\cygwin\\bin\\vmstat.exe' : 'vmstat'), ['-n', samplingRate], null, null, function (err, userValue) {
+            if (err) {
+                if (debug) util.log('monitor|vmstat|host='+server+':'+port+'|err=' + util.inspect(err));
+                throw err;
+            }
+            userValue = userValue;
+        });
+        vmstat.stdout.on('data', function (data) {
+            processVmStatData(data);
+        });
+        vmstat.stderr.on('data', function (data) {
+            if (debug) util.log('monitor|vmstat|stderr=' + data + '\n');
+        });
+    }
     
-    util.log('Starting monitor on ' + hostname + ' to ' + server + ':' + port);  
-    var vmstat = execute('vmstat', ['-n', samplingRate], null, null, function (err, userValue) {
-        if (err) {
-            if (debug) util.log('monitor|vmstat|host='+server+':'+port+'|err=' + util.inspect(err));
-            throw err;
-        }
-        userValue = userValue;
-    });
-    
-    vmstat.stdout.on('data', function (data) {
+    function processVmStatData(data) {
          var line = '' + data;
          var capture = line.match(vmstatRegex);
          if (debug) util.log('monitor|vmstat|stout=' + data + '|capture=' + util.inspect(capture));
-         if (capture !== null && capture[0] !== undefined && capture.length === vmstatRegexLen) {
+         if (capture !== null && capture[0] !== undefined && capture.length >= vmstatRegexLen) {
              send(hostname + '.cpu.used:' + (100 - capture[idle]) + '|g');
              send(hostname + '.cpu.user:' + capture[user] + '|g');
              send(hostname + '.cpu.system:' + capture[system] + '|g');
@@ -196,16 +295,15 @@ var util  = require('util'),
              send(hostname + '.kernel.interrupt:' + capture[interrupt] + '|c');
              send(hostname + '.kernel.contextswitch:' + capture[contextSwitch] + '|c');
              send(hostname + '.kernel.wait.io:' + capture[waitIO] + '|c');
-             send(hostname + '.vmware.overhead:' + capture[stolenVM] + '|c');
+             if (capture.length > stolenVM)
+                send(hostname + '.vmware.overhead:' + capture[stolenVM] + '|c');
 
              send(hostname + '.process.wait:' + capture[waitForRuntime] + '|c');
              send(hostname + '.process.sleep:' + capture[nbUninterruptibleSleep] + '|c');
              
          }
-    });
-    vmstat.stderr.on('data', function (data) {
-        if (debug) util.log('monitor|vmstat|stderr=' + data + '\n');
-    });
+    }
+    
     checkDisk();
     checkNetwork();
 })();
