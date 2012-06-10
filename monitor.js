@@ -3,6 +3,7 @@ var MacNetstat   = require('./modules/macosx/netstat'),
     WinNetstat   = require('./modules/windows/netstat'),
     VmstatLinux  = require('./modules/linux/vmstat'),
     VmstatWin    = require('./modules/windows/vmstat'),
+    VmstatMacOsX = require('./modules/macosx/vmstat'),
     Df           = require('./modules/df'),
     util    = require('util'),
     os      = require('os'),
@@ -47,19 +48,19 @@ var MacNetstat   = require('./modules/macosx/netstat'),
     }
 
     var netstat = isMacOs() ? new MacNetstat(samplingRate) : (isLinux() ? new LinuxNetstat(samplingRate) : new WinNetstat(samplingRate));
-    
+    util.log('Starting Monitoring Service on ' + os.hostname() + ', reporting to ' + server + ':' + port);
     netstat.start();
     netstat.on('stats', function (stats) {
         sendStats(stats);
     });
     
-    var df = new Df(1);
+    var df = new Df(samplingRate);
     df.start();
     df.on('stats', function (stats) {
         sendStats(stats);
     });
     
-    var vmstat = isLinux() ? new VmstatLinux(1) : (isMacOs() ? null : new VmstatWin(1));
+    var vmstat = isLinux() ? new VmstatLinux(samplingRate) : (isMacOs() ? new VmstatMacOsX(samplingRate) : new VmstatWin(samplingRate));
     if (vmstat) {
         vmstat.start();
         vmstat.on('stats', function (stats) {
