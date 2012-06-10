@@ -1,86 +1,33 @@
-var util  = require('util'),
-    spawn = require('child_process').spawn,
-    dgram = require('dgram'),
-    os    = require("os");
+var MacNetstat   = require('./modules/macosx/netstat'),
+    LinuxNetstat = require('./modules/linux/netstat'),
+    WinNetstat   = require('./modules/windows/netstat'),
+    VmstatLinux  = require('./modules/linux/vmstat'),
+    VmstatWin    = require('./modules/windows/vmstat'),
+    Df           = require('./modules/df'),
+    util    = require('util'),
+    os      = require('os'),
+    dgram = require('dgram');
 
-/**
- * Linux
- * vmstat -n 10
- * procs -----------memory---------- ---swap-- -----io---- --system-- -----cpu------
- *  r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st
- *  0  0  45080 10970204 120756 437012    0    0     0     2   11    4  0  0 100  0  0
- *  0  0  45080 10970204 120756 437012    0    0     0     0 1012   70  0  0 100  0  0
- *  0  0  45080 10970204 120756 437012    0    0     0     0 1010   78  0  0 100  0  0
- * 
- * Cygwin
- * procs -----------memory---------- ---swap-- -----io---- -system-- ----cpu----
- *  r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa
- *  0  0  10020 1977732      0      0    0    0     0     0    0    0  0  1 99  0
- *
- */
-
-/**
- * root@mt-nme-cosnme2 ~]# df -P
- * Filesystem         1024-blocks      Used Available Capacity Mounted on
- * /dev/mapper/VolGroup00-LogVol00  40756536   3619856  35032976      10% /
- * /dev/sda1               101086     12711     83156      14% /boot
- * tmpfs                  6667044         0   6667044       0% /dev/shm
-*/
-
-/**
- * eth0      Link encap:Ethernet  HWaddr 00:50:56:86:63:22  
- *           inet addr:10.3.39.106  Bcast:10.3.39.255  Mask:255.255.252.0
- *           inet6 addr: fd51:ffbb:ffbb:324:250:56ff:fe86:6322/64 Scope:Global
- *           inet6 addr: fe80::250:56ff:fe86:6322/64 Scope:Link
- *           UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
- *           RX packets:30184720 errors:0 dropped:0 overruns:0 frame:0
- *           TX packets:3390966 errors:0 dropped:0 overruns:0 carrier:0
- *           collisions:0 txqueuelen:1000 
- *           RX bytes:3930128736 (3.6 GiB)  TX bytes:2094861790 (1.9 GiB)
- * 
- * lo        Link encap:Local Loopback  
- *           inet addr:127.0.0.1  Mask:255.0.0.0
- *           inet6 addr: ::1/128 Scope:Host
- *           UP LOOPBACK RUNNING  MTU:16436  Metric:1
- *           RX packets:219953 errors:0 dropped:0 overruns:0 frame:0
- *           TX packets:219953 errors:0 dropped:0 overruns:0 carrier:0
- *           collisions:0 txqueuelen:0 
- *           RX bytes:270297634 (257.7 MiB)  TX bytes:270297634 (257.7 MiB)
- */
- 
- /**
-  * $ netstat -e
-  * Interface Statistics
-  * 
-  *                            Received            Sent
-  * 
-  * Bytes                    2190616468      2731744448
-  * Unicast packets            24326331        17355436
-  * Non-unicast packets         2506457           24290
-  * Discards                          0               0
-  * Errors                            0               0
-  * Unknown protocols              5528
-  */
-
-(function () {
-    var debug    = false,
-        client   = dgram.createSocket("udp4"),
-        server   = process.env.STATSD_HOST || '127.0.0.1',
-        port     = process.env.STATSD_PORT || 8125,
-        samplingRate = process.env.SAMPLING_RATE || 10,
-        disksamplingRate = process.env.DISK_SAMPLING_RATE || 60000,
-        hostname = os.hostname(),
-        vmstatRegex = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(\d+))?\s*$/,
-        waitForRuntime=1,nbUninterruptibleSleep=2,swpd=3,free=4,buffers=5,cache=6,swappedIn=7,swappedOut=8,read=9,write=10,interrupt=11,contextSwitch=12,user=13,system=14,idle=15,waitIO=16,stolenVM=17,vmstatRegexLen=18 -1,
-        dfRegex =  /^\s*([^\s]+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)%\s+([^\s]+)\s*$/,
-        fileSystem=1,blocks=2,used=3,available=4,capacity=5,mount=6,dfRegexLen=7,
-        ifconfigInterfaceNameRegex = /^([a-zA-Z0-9]+)\s+/,
-        ifconfigRegex = /^\s+RX\s+bytes:\s*(\d+)\s+\([^)]+\)\s+TX\s+bytes:\s*(\d+)\s+\([^)]*\)\s*$/,
-        received=1,sent=2,ifconfigRegexLen=3,
-        netstatRegex = /^[^0-9]+(\d+)\s+(\d+)\s*$/,
-        nsReceived=1,nsSent=2,nsRegexLen=3;
+(function() {
+    var debug        = false,
+        client       = dgram.createSocket("udp4"),
+        server       = process.env.STATSD_HOST || '127.0.0.1',
+        port         = process.env.STATSD_PORT || 8125,
+        samplingRate = process.env.SAMPLING_RATE || 10;
         
-
+    function isWindows() {
+        var win = 'Windows';
+        return (os.type().substring(0, win.length) == win);
+    }
+    function isMacOs() {
+        var darwin = 'Darwin';
+        return (os.type().substring(0, darwin.length) == darwin);
+    }
+    function isLinux() {
+        var linux = 'Linux';
+        return (os.type().substring(0, linux.length) == linux);
+    }
+    
     function send(message) {
         var buffer = new Buffer(message);
         client.send(buffer, 0, buffer.length, port, server, function (err, bytes) {
@@ -93,217 +40,30 @@ var util  = require('util'),
         });
     }
     
-    function execute(command, args, userValue, options, callback) {
-        var $this = this,
-            finalOptions = {
-                "cwd": "/tmp/",
-                "env": {
-                    "ENV":"development"
-                },
-                "customFds":[-1, -1, -1]
-            },
-            output = '';
-        if (options) for (var prop in options) { finalOptions[prop] = options[prop]; }
-            
-        if (debug) util.log('monitor|execute|command='+command+'|args=' + util.inspect(args)+'|options='+util.inspect(finalOptions));
-        var child = spawn(command, args, finalOptions);
-        child.on('exit', function (code /*, signal*/) {
-            if (debug) util.log('monitor|execute|command='+command+'|args=' + util.inspect(args)+'|exit_code='+code);
-            if (code === 0) {
-                if (debug) util.log('monitor|execute|command='+command+'|args=' + util.inspect(args)+'|exit_code='+code+'|'+output);
-                callback.call($this, null, userValue);
-            } else {
-                callback.call($this, new Error(output), userValue);
-            }
-        });
-        return child;
-    }
-    
-    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    var bytesSent     = [],
-        bytesReceived = [];
-    function checkNetworkLinux() {
-        var interfaceName = 'unknown';
-        var ifconfig = execute('/sbin/ifconfig', null, null, null, function (err, userValue) {
-            if (err) {
-                if (debug) util.log('monitor|ifconfig|host='+server+':'+port+'|err=' + util.inspect(err));
-                throw err;
-            }
-            userValue = userValue;
-            setTimeout(checkNetworkLinux, disksamplingRate);
-        });
-        ifconfig.stdout.on('data', function (data) {
-            var lines = ('' + data).split(/\r?\n/);
-            for (var i = 0 ; i < lines.length ; ++i) {
-                var capture = lines[i].match(ifconfigInterfaceNameRegex);
-                if (debug) util.log('monitor|ifconfig|stout=' + lines[i] + '|capture=' + util.inspect(capture));
-                if (capture !== null && capture[0] !== undefined && capture.length === 2) {
-                    interfaceName = capture[1];
-                } else {
-                    capture = lines[i].match(ifconfigRegex);
-                    if (debug) util.log('monitor|ifconfig|stout=' + lines[i] + '|capture=' + util.inspect(capture));
-                    if (capture !== null && capture[0] !== undefined && capture.length === ifconfigRegexLen) { 
-                        if (bytesSent[interfaceName] !== undefined && bytesReceived[interfaceName] !== undefined) {
-                            send(hostname + '.network.' + interfaceName + '.sent:' + (capture[sent] - bytesSent[interfaceName]) + '|g');
-                            send(hostname + '.network.' + interfaceName + '.received:' + (capture[received] - bytesReceived[interfaceName]) + '|g');
-                        }
-                        bytesSent[interfaceName]     = parseInt(capture[sent]);
-                        bytesReceived[interfaceName] = parseInt(capture[received]);
-                    }
-                }
-            }
-        });
-        ifconfig.stderr.on('data', function (data) {
-            if (debug) util.log('monitor|ifconfig|stderr=' + data + '\n');
-        });
-    }
-    function checkNetworkWindows() {
-        var interfaceName = 'all',
-            totalSent = 0,
-            totalReceived = 0;
-
-        var ifconfig = execute('netstat', ['-e'], null, null, function (err, userValue) {
-            if (err) {
-                if (debug) util.log('monitor|netstat|host='+server+':'+port+'|err=' + util.inspect(err));
-                throw err;
-            }
-            userValue = userValue;
-            if (bytesSent[interfaceName] !== undefined && bytesReceived[interfaceName] !== undefined) {
-                send(hostname + '.network.' + interfaceName + '.sent:' + (totalSent - bytesSent[interfaceName]) + '|g');
-                send(hostname + '.network.' + interfaceName + '.received:' + (totalReceived - bytesReceived[interfaceName]) + '|g');
-            }
-            bytesSent[interfaceName]     = totalSent;
-            bytesReceived[interfaceName] = totalReceived;
-            setTimeout(checkNetworkWindows, disksamplingRate);
-        });
-        ifconfig.stdout.on('data', function (data) {
-            var lines = ('' + data).split(/\r?\n/);
-            for (var i = 0 ; i < lines.length ; ++i) {
-                var capture = lines[i].match(netstatRegex);
-                if (debug) util.log('monitor|netstat|stout=' + lines[i] + '|capture=' + util.inspect(capture));
-                if (capture !== null && capture[0] !== undefined && capture.length === nsRegexLen) { 
-                    totalSent     += parseInt(capture[nsSent]);
-                    totalReceived += parseInt(capture[nsReceived]);
-                }
-            }
-        });
-        ifconfig.stderr.on('data', function (data) {
-            if (debug) util.log('monitor|ifconfig|stderr=' + data + '\n');
-        });
-    }
-    
-    function isWindows() {
-        var win = 'Windows';
-        return (os.type().substring(0, win.length) == win);
-    }
-    
-    function checkNetwork() {
-        if (isWindows()) {
-            checkNetworkWindows();
-        } else {
-            checkNetworkLinux();
+    function sendStats(stats) {
+        for (var stat in stats) {
+            send(stat + ':' + stats[stat] + '|g');
         }
-
-    }
-    
-    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    
-
-    function checkDisk() {
-        var df = execute((isWindows() ? '\\cygwin\\bin\\df.exe' : 'df'), (isWindows() ? null : ['-P']), null, null, function (err, userValue) {
-            if (err) {
-                if (debug) util.log('monitor|df|host='+server+':'+port+'|err=' + util.inspect(err));
-                throw err;
-            }
-            userValue = userValue;
-        });
-        df.stdout.on('data', function (data) {
-            var lines = ('' + data).split(/\r?\n/);
-            for (var i = 0 ; i < lines.length ; ++i) {
-                var capture = lines[i].match(dfRegex);
-                if (debug) util.log('monitor|df|stout=' + lines[i] + '|capture=' + util.inspect(capture));
-                if (capture !== null && capture[0] !== undefined && capture.length === dfRegexLen) {
-                    send(hostname + '.disk.' + capture[mount].replace(/\//g,"_") + '.used:' + capture[capacity] + '|g');
-                }
-            }
-        });
-        df.stderr.on('data', function (data) {
-            if (debug) util.log('monitor|df|stderr=' + data + '\n');
-        });
-        setTimeout(checkDisk, disksamplingRate);
-    }
-    
-    /////////////////////////////////////////// MAIN ///////////////////////////////////////////////////////////////////////////
-    
-    util.log('Starting monitor on ' + hostname + ' to ' + server + ':' + port);
-    function vmstatWindows() {
-        var vmstatBuffer = '';
-        var vmstat = execute('\\cygwin\\bin\\vmstat.exe', ['-n', 1, 2], null, null, function (err, userValue) {
-            if (err) {
-                if (debug) util.log('monitor|vmstat|host='+server+':'+port+'|err=' + util.inspect(err));
-                throw err;
-            }
-            userValue = userValue;
-            processVmStatData(vmstatBuffer.split(/\n/)[3]);
-            setTimeout(vmstatWindows, samplingRate*1000);
-        });
-        vmstat.stdout.on('data', function (data) {
-            vmstatBuffer += data;
-        });
-        vmstat.stderr.on('data', function (data) {
-            if (debug) util.log('monitor|vmstat|stderr=' + data + '\n');
-        });
     }
 
-    if (isWindows()) {
-        vmstatWindows();
-    } else {
-        var vmstat = execute((isWindows() ? '\\cygwin\\bin\\vmstat.exe' : 'vmstat'), ['-n', samplingRate], null, null, function (err, userValue) {
-            if (err) {
-                if (debug) util.log('monitor|vmstat|host='+server+':'+port+'|err=' + util.inspect(err));
-                throw err;
-            }
-            userValue = userValue;
-        });
-        vmstat.stdout.on('data', function (data) {
-            processVmStatData(data);
-        });
-        vmstat.stderr.on('data', function (data) {
-            if (debug) util.log('monitor|vmstat|stderr=' + data + '\n');
-        });
-    }
+    var netstat = isMacOs() ? new MacNetstat(samplingRate) : (isLinux() ? new LinuxNetstat(samplingRate) : new WinNetstat(samplingRate));
     
-    function processVmStatData(data) {
-         var line = '' + data;
-         var capture = line.match(vmstatRegex);
-         if (debug) util.log('monitor|vmstat|stout=' + data + '|capture=' + util.inspect(capture));
-         if (capture !== null && capture[0] !== undefined && capture.length >= vmstatRegexLen) {
-             send(hostname + '.cpu.used:' + (100 - capture[idle]) + '|g');
-             send(hostname + '.cpu.user:' + capture[user] + '|g');
-             send(hostname + '.cpu.system:' + capture[system] + '|g');
-             
-             send(hostname + '.memory.swapused:' + capture[swpd] + '|g');
-             send(hostname + '.memory.free:' + capture[free] + '|g');
-             send(hostname + '.memory.used_for_buffers:' + capture[buffers] + '|g');
-             send(hostname + '.memory.used_for_cache:' + capture[cache] + '|g');
-             send(hostname + '.memory.swap.in:' + capture[swappedIn] + '|c');
-             send(hostname + '.memory.swap.out:' + capture[swappedOut] + '|c');
-
-             send(hostname + '.disk.read:' + capture[read] + '|c');
-             send(hostname + '.disk.write:' + capture[write] + '|c');
-             
-             send(hostname + '.kernel.interrupt:' + capture[interrupt] + '|c');
-             send(hostname + '.kernel.contextswitch:' + capture[contextSwitch] + '|c');
-             send(hostname + '.kernel.wait.io:' + capture[waitIO] + '|c');
-             if (capture.length > stolenVM)
-                send(hostname + '.vmware.overhead:' + capture[stolenVM] + '|c');
-
-             send(hostname + '.process.wait:' + capture[waitForRuntime] + '|c');
-             send(hostname + '.process.sleep:' + capture[nbUninterruptibleSleep] + '|c');
-             
-         }
-    }
+    netstat.start();
+    netstat.on('stats', function (stats) {
+        sendStats(stats);
+    });
     
-    checkDisk();
-    checkNetwork();
+    var df = new Df(1);
+    df.start();
+    df.on('stats', function (stats) {
+        sendStats(stats);
+    });
+    
+    var vmstat = isLinux() ? new VmstatLinux(1) : (isMacOs() ? null : new VmstatWin(1));
+    if (vmstat) {
+        vmstat.start();
+        vmstat.on('stats', function (stats) {
+            sendStats(stats);
+        });
+    }    
 })();
