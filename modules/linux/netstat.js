@@ -37,10 +37,16 @@ module.exports = (function () {
         this.hostname      = os.hostname();
         this.bytesSent     = [];
         this.bytesReceived = [];
+        this.packetsSent     = [];
+        this.packetsReceived = [];
         this.samplingRate  = samplingRate;
         this.interfaceNameRegex = /^([a-zA-Z0-9]+)\s+/;
-        this.regex = /^\s+RX\s+bytes:\s*(\d+)\s+\([^)]+\)\s+TX\s+bytes:\s*(\d+)\s+\([^)]*\)\s*$/;
-        this.received = 1; this.sent = 2; this.regexLen=3;
+        this.rxPacketsRegex = /^\s+RX\s+packets:\s*(\d+)\s+errors:\s*(\d+)\s+dropped:\s*(\d+)\s+overruns:\s*(\d+)\s+frame:(\d+)\s*$/;
+        this.packetsRX = 1; this.errorsRX = 2; this.droppedRX = 3; this.overrunsRX = 4; this.frameRX = 5; this.rxPacketsRegexLen = 6;
+        this.txPacketsRegex = /^\s+TX\s+packets:\s*(\d+)\s+errors:\s*(\d+)\s+dropped:\s*(\d+)\s+overruns:\s*(\d+)\s+carrier:(\d+)\s*$/;
+        this.packetsTX = 1; this.errorsTX = 2; this.droppedTX = 3; this.overrunsTX = 4; this.carrierTX = 5; this.txPacketsRegexLen = 6;
+        this.bytesRegex = /^\s+RX\s+bytes:\s*(\d+)\s+\([^)]+\)\s+TX\s+bytes:\s*(\d+)\s+\([^)]*\)\s*$/;
+        this.received = 1; this.sent = 2; this.bytesRegexLen=3;
     }
     
     util.inherits(Netstat, events.EventEmitter);
@@ -63,24 +69,51 @@ module.exports = (function () {
         
         netstat.stdout.on('data', function (data) {
             var lines = ('' + data).split(/\r?\n/);
+            var stats;
 
             for (var i = 0 ; i < lines.length ; ++i) {
                 var capture = lines[i].match($this.interfaceNameRegex);
-                if ($this.debug) util.log('linux|netstat|stout=' + lines[i] + '|capture=' + util.inspect(capture));
+                if ($this.debug) util.log('linux|netstat|stout=' + lines[i] + '|interface-capture=' + util.inspect(capture));
                 if (capture !== null && capture[0] !== undefined && capture.length === 2) {
                     interfaceName = capture[1];
+                    stats = {};
                 } else {
-                    capture = lines[i].match($this.regex);
-                    if ($this.debug) util.log('linux|netstat|stout=' + lines[i] + '|capture=' + util.inspect(capture));
-                    if (capture !== null && capture[0] !== undefined && capture.length === $this.regexLen) { 
-                        if ($this.bytesSent[interfaceName] !== undefined && $this.bytesReceived[interfaceName] !== undefined) {
-                            var stats = {};
-                            stats[$this.hostname + '.network.' + interfaceName + '.inputBytes'    ] = capture[$this.received] - $this.bytesReceived[interfaceName];
-                            stats[$this.hostname + '.network.' + interfaceName + '.outputBytes'   ] = capture[$this.sent] - $this.bytesSent[interfaceName];
-                            $this.emit('stats', stats);
+                    capture = lines[i].match($this.rxPacketsRegex);
+                    if ($this.debug) util.log('linux|netstat|stout=' + lines[i] + '|rx-capture=' + util.inspect(capture));
+                    if (capture !== null && capture[0] !== undefined && capture.length === $this.rxPacketsRegexLen) { 
+                        if ($this.packetsReceived[interfaceName] !== undefined && $this.packetsReceived[interfaceName] !== undefined) {
+                            stats[$this.hostname + '.network.' + interfaceName + '.inputPackets'    ] = parseInt(capture[$this.packetsRX]) - $this.packetsReceived[interfaceName];
                         }
-                        $this.bytesSent[interfaceName]     = parseInt(capture[$this.sent]);
-                        $this.bytesReceived[interfaceName] = parseInt(capture[$this.received]);
+                        $this.packetsReceived[interfaceName] = parseInt(capture[$this.packetsRX]);
+                        stats[$this.hostname + '.network.' + interfaceName + '.inputErrors'   ] = capture[$this.errorsRX];
+                        stats[$this.hostname + '.network.' + interfaceName + '.inputDropped'  ] = capture[$this.droppedRX];
+                        stats[$this.hostname + '.network.' + interfaceName + '.inputOverruns' ] = capture[$this.overrunsRX];
+                        stats[$this.hostname + '.network.' + interfaceName + '.inputFrame'    ] = capture[$this.frameRX];
+                    } else {
+                        capture = lines[i].match($this.txPacketsRegex);
+                        if ($this.debug) util.log('linux|netstat|stout=' + lines[i] + '|tx-capture=' + util.inspect(capture));
+                        if (capture !== null && capture[0] !== undefined && capture.length === $this.txPacketsRegexLen) { 
+                            if ($this.packetsSent[interfaceName] !== undefined && $this.packetsSent[interfaceName] !== undefined) {
+                                stats[$this.hostname + '.network.' + interfaceName + '.outputPackets'    ] = parseInt(capture[$this.packetsTX]) - $this.packetsSent[interfaceName];
+                            }
+                            $this.packetsSent[interfaceName] = parseInt(capture[$this.packetsTX]);
+                            stats[$this.hostname + '.network.' + interfaceName + '.outputErrors'  ] = capture[$this.errorsTX];
+                            stats[$this.hostname + '.network.' + interfaceName + '.outputDropped' ] = capture[$this.droppedTX];
+                            stats[$this.hostname + '.network.' + interfaceName + '.outputOverruns'] = capture[$this.overrunsTX];
+                            stats[$this.hostname + '.network.' + interfaceName + '.outputCarrier' ] = capture[$this.carrierTX];
+                        } else {
+                            capture = lines[i].match($this.bytesRegex);
+                            if ($this.debug) util.log('linux|netstat|stout=' + lines[i] + '|capture=' + util.inspect(capture));
+                            if (capture !== null && capture[0] !== undefined && capture.length === $this.bytesRegexLen) { 
+                                if ($this.bytesSent[interfaceName] !== undefined && $this.bytesReceived[interfaceName] !== undefined) {
+                                    stats[$this.hostname + '.network.' + interfaceName + '.inputBytes'    ] = parseInt(capture[$this.received]) - $this.bytesReceived[interfaceName];
+                                    stats[$this.hostname + '.network.' + interfaceName + '.outputBytes'   ] = parseInt(capture[$this.sent]) - $this.bytesSent[interfaceName];
+                                    $this.emit('stats', stats);
+                                }
+                                $this.bytesSent[interfaceName]     = parseInt(capture[$this.sent]);
+                                $this.bytesReceived[interfaceName] = parseInt(capture[$this.received]);
+                            }
+                        }
                     }
                 }
             }
