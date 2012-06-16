@@ -42,9 +42,17 @@ var MacNetstat   = require('./modules/macosx/netstat'),
     }
     
     function sendStats(stats) {
+        var buffer = '';
+        var addLF = false;
         for (var stat in stats) {
-            send(stat + ':' + stats[stat] + '|g');
+            if (addLF) {
+                buffer += '\n' + stat + ':' + stats[stat] + '|g';
+            } else {
+                addLF = true;
+                buffer += stat + ':' + stats[stat] + '|g';
+            }
         }
+        send(buffer);
     }
 
     var netstat = isMacOs() ? new MacNetstat(samplingRate) : (isLinux() ? new LinuxNetstat(samplingRate) : new WinNetstat(samplingRate));
