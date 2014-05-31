@@ -2,7 +2,7 @@
     "author"      : "Henri Bouvier",
     "name"        : "monitord",
     "description" : "Collect CPU, Memory and Networking usage to StatD",
-    "version"     : "0.0.1",
+    "version"     : "0.0.2",
     "keywords": [
         "monitoring",
         "cpu",
