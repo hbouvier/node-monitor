@@ -1,0 +1,32 @@
+#!/bin/sh
+# Script to start/stop node-monitor
+#
+case "$1" in
+     start)
+		echo "Starting service"
+		monitord >& /tmp/monitord.log &
+		;;
+	  stop)
+		echo "Stopping service"
+		PID=`ps -ef | grep "monitord" | grep -v grep | awk '{ print $2 }'`
+		if [ "$PID" != "" ] ; then
+			echo "$PID" | xargs kill
+		fi
+		;;
+	  restart)
+		echo "Stopping service"
+		PID=`ps -ef | grep "monitord" | grep -v grep | awk '{ print $2 }'`
+		if [ "$PID" != "" ] ; then
+			echo "$PID" | xargs kill
+		fi
+		echo "Starting service"
+		monitord >& /tmp/monitord.log &
+		;;
+	  status)
+		ps -ef | grep "monitord" | grep -v grep
+		;;
+	  *)
+		echo "Usage: $0 { start|stop|status|restart }"
+		exit 1
+esac
+exit $?

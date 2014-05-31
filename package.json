@@ -1,0 +1,44 @@
+{
+    "author"      : "Henri Bouvier",
+    "name"        : "monitord",
+    "description" : "Collect CPU, Memory and Networking usage to StatD",
+    "version"     : "0.0.1",
+    "keywords": [
+        "monitoring",
+        "cpu",
+        "memory",
+        "networking"
+    ],
+    "repository"  : {
+        "type" : "git",
+        "url"  : "https://github.com/hbouvier/node-monitor.git"
+    },
+    "main" : "./lib/monitor.js",
+    "bin"  : {
+        "monitord" : "./bin/monitord"
+    },
+    "dependencies"         : {
+        "winston" : "0.7.2"
+    },
+    "devDependencies": {
+        "jasmine-node"      : "latest",
+        "istanbul"          : "latest",
+	"coveralls"         : "2.6.1",
+        "complexity-report" : "latest",
+        "jslint"            : "latest"
+    },
+    "engines"              : {
+        "node" : ">= 0.10.0 < 0.11.0"
+    },
+    "scripts": {
+        "start": "bin/monitord",
+        "test" : "cr --maxcc 15 lib/monitor.js && istanbul cover jasmine-node -- spec && cat ./coverage/lcov.info | ./node_modules/coveralls/bin/coveralls.js && rm -rf ./coverage",
+        "istanbul-test" : "istanbul cover jasmine-node -- spec && cr --maxcc 15 lib/monitor.js",
+        "verbose-test" : "jasmine-node --verbose spec",
+        "autotest" : "jasmine-node --autotest spec --watch .",
+        "lint"     : "jslint lib/*",
+        "complex": "cr --maxcc 15 lib/monitor.js",
+        "prestine" : "rm -rf coverage lib-cov node_modules",
+        "clean" : "rm -rf coverage lib-cov"
+    }
+}
